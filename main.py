@@ -15,8 +15,12 @@ private_key = ed25519.Ed25519PrivateKey.generate()
 #Get corresponding public key
 public_key = private_key.public_key()
 
-#printing keys for learning
-public_bytes = public_key.public_bytes(
-    encoding=serialization.Encoding.Raw,
-    format=serialization.PublicFormat.Raw
-)
+choice = input('Host(1) Connect(2): ')
+
+if choice == 1:
+    pass #TODO: hosting
+elif choice == 2:
+    pass #TODO: connecting to hosted server
+else:
+    print('Invalid input, run again')
+    exit()
