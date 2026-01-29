@@ -1,3 +1,5 @@
+#TODO: add multithreading to handle multiple clients
+
 import socket
 
 import datetime
