@@ -1,65 +1,51 @@
-
+#TODO: give clients other clients info ip/port so they can connect to each other
 
 import socket
 import datetime
 import threading
 import time
 
-connected_clients = {'clients': []}
+connected_clients = {}
 clients_lock = threading.Lock()
 id_counter = 0
 
-
-def allow_client(connected_clients):
-    client, addr = server.accept()
-    ip, port = addr
-
-    global id_counter
-    id_counter += 1
-
-    print(f'\nclient{id_counter} connected form {addr}')
-
-    with clients_lock:
-        connected_clients[f'client{id_counter}'] = {
-            'ip': ip,
-            'port': port,
-        }
-
-    print(connected_clients)
-
-    while True:
-        try:
-            data = client.recv(1024)
-
-            if not data:
-                print('client disconnected')
-                break
-            timestamp = datetime.datetime.now()
-            timestamp_str = timestamp.strftime('%Y-%m-%d %H:%M:%S')
-
-            msg = data.decode()    
-            print(f'[{timestamp_str}] {addr}: {msg}')
-            client.send('message recieved'.encode())
-        except:
-            break
-
-    client.close()
-
-
 server = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-
 server.bind(('127.0.0.1', 8080))
-
 server.listen(2)
-
 print('Server listening on port 8080...')
 
-#what server is doing
+while len(connected_clients) < 2:
+    client, addr = server.accept()
+    id_counter += 1
 
-t1 = threading.Thread(target=allow_client, args=(connected_clients,), daemon=True)
-t2 = threading.Thread(target=allow_client, args=(connected_clients,), daemon=True)
+    client_id = f'client{id_counter}'
+    ip, port = addr
 
-t1.start()
-t2.start()
+    connected_clients[f'client{id_counter}'] = {
+        'socket': client,
+        'ip': ip,
+        'port': 8081 if id_counter == 1 else 8082,
+        'role': 'listener' if id_counter ==1 else 'connector'
+        }
 
-end = input('press enter to shut down server: \n')
+    print(f'{client_id} connected from {addr}')
+
+c1 = connected_clients['client1']
+c1_ip = connected_clients['client1']['ip']
+c1_port = connected_clients['client1']['port']
+c1_role = connected_clients['client1']['role']
+
+c2 = connected_clients['client2']
+c2_ip = connected_clients['client2']['ip']
+c2_port = connected_clients['client2']['port']
+c2_role = connected_clients['client2']['role']
+
+#send client 1 data to client 2
+c1_data = f'{c1_ip}:{c1_port}:{c1_role}'
+c2['socket'].send(c1_data.encode())
+c2['socket'].close()
+
+#send client2 data to client1
+c2_data = f'{c2_ip}:{c2_port}:{c1_role}'
+c1['socket'].send(c2_data.encode())
+c1['socket'].close()
