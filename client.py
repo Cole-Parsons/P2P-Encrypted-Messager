@@ -3,9 +3,11 @@
 import socket
 import threading
 import time
+import sys
+
 
 peer_socket = None
-port = 8081
+listener_port = int(sys.argv[1])
 
 def connect_to_peer(ip, port):
     global peer_socket
@@ -27,10 +29,10 @@ def listener_for_peer(port):
     peer_socket = conn
     print(f'Peer connected from {addr}')
 
-
-
 rendezvous = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
 rendezvous.connect(('127.0.0.1', 8080))
+
+rendezvous.send(str(listener_port).encode())
 
 print('Connected to server')
 print('Waiting for other client to connect')
@@ -47,9 +49,11 @@ print(peer_ip, peer_port)
 if peer_role == 'listener':
     t = threading.Thread(target=connect_to_peer, args=(peer_ip, peer_port))
 else:
-    t = threading.Thread(target=listener_for_peer, args=(port,))
+    t = threading.Thread(target=listener_for_peer, args=(listener_port,))
 
 t.start()
+
+print(peer_socket)
 
 counter = 0
 while peer_socket is None:

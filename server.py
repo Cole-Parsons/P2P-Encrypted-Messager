@@ -16,6 +16,9 @@ print('Server listening on port 8080...')
 
 while len(connected_clients) < 2:
     client, addr = server.accept()
+
+    listener_port = int(client.recv(1024).decode())
+
     id_counter += 1
 
     client_id = f'client{id_counter}'
@@ -24,8 +27,8 @@ while len(connected_clients) < 2:
     connected_clients[f'client{id_counter}'] = {
         'socket': client,
         'ip': ip,
-        'port': 8081 if id_counter == 1 else 8082,
-        'role': 'listener' if id_counter ==1 else 'connector'
+        'port': listener_port,
+        'role': 'listener' if id_counter == 1 else 'connector'
         }
 
     print(f'{client_id} connected from {addr}')
@@ -46,6 +49,6 @@ c2['socket'].send(c1_data.encode())
 c2['socket'].close()
 
 #send client2 data to client1
-c2_data = f'{c2_ip}:{c2_port}:{c1_role}'
+c2_data = f'{c2_ip}:{c2_port}:{c2_role}'
 c1['socket'].send(c2_data.encode())
 c1['socket'].close()
