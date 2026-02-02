@@ -4,10 +4,15 @@ import socket
 import threading
 import time
 import sys
+import datetime
 
 peer_socket = None
 listener_port = int(sys.argv[1])
 peer_connected_event = threading.Event()
+
+timestamp = datetime.datetime.now()
+timestamp_str = timestamp.strftime('%Y-%m-%d %H:%M:%S')
+
 
 def connect_to_peer(ip, port, event):
     global peer_socket
@@ -41,18 +46,19 @@ def listener_for_peer(port, event):
 
 def send_msg(event):
     event.wait()
+    print('Connected Start chatting!')
     while True:
-        msg = input('> ')
+        msg = input('')
         peer_socket.send(msg.encode())
 
 
 def recv_msg(event):
     event.wait()
     while True:
-        data = peer_socket.recv(1024)
+        data = peer_socket.recv(1024).decode()
         if not data:
             break
-        print(data.decode())
+        print(f'{timestamp_str}: {data}')
 
 
 rendezvous = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
@@ -91,11 +97,3 @@ peer_connected_event.wait()
 
 sender_thread.start()
 reciever_thread.start()
-
-
-# timestamp = datetime.datetime.now()
-#timestamp_str = timestamp.strftime('%Y-%m-%d %H:%M:%S')
-
-#msg = data.decode()    
-#print(f'[{timestamp_str}] {addr}: {msg}')
-#client.send('message recieved'.encode())
