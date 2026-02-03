@@ -16,9 +16,11 @@ A peer-to-peer chat application written in Python that establishes a secure, enc
 * cryptography library `pip install cryptography`  
 
 Start rendezvous server `python server.py`  
+
 Start two clients in seperate terminals (ensure port arguments are two different numbers)  
 `python client.py 5001`  
 `python client.py 5002`  
+
 Now start chatting!  
 
 ## Road Map  
