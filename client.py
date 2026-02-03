@@ -1,12 +1,22 @@
-#TODO: convert client to its own server so other client can connect
+#TODO: add quitting function, prevent MITM attacks(authentification), open it up to web, not just client local cli based, gui
 
 import socket
 import threading
 import time
 import sys
 import datetime
+import os
+from cryptography.hazmat.primitives import serialization
+from cryptography.hazmat.primitives.asymmetric import x25519
+from cryptography.hazmat.primitives.kdf.hkdf import HKDF
+from cryptography.hazmat.primitives import hashes
+from cryptography.hazmat.primitives.ciphers.aead import AESGCM
+
+private_key = x25519.X25519PrivateKey.generate()
+public_key = private_key.public_key()
 
 peer_socket = None
+
 listener_port = int(sys.argv[1])
 peer_connected_event = threading.Event()
 
@@ -44,22 +54,34 @@ def listener_for_peer(port, event):
     event.set()
 
 
-def send_msg(event):
+def send_msg(event, aesgcm):
     event.wait()
     print('Connected Start chatting!')
     while True:
         msg = input('')
-        peer_socket.send(msg.encode())
+        plaintext = msg.encode()
+        nonce = os.urandom(12)
+        ciphertext = aesgcm.encrypt(nonce, plaintext, None)
+        peer_socket.send(nonce + ciphertext)
 
 
-def recv_msg(event):
+def recv_msg(event, aesgcm):
     event.wait()
     while True:
-        data = peer_socket.recv(1024).decode()
+        data = peer_socket.recv(4096)
         if not data:
             break
-        print(f'{timestamp_str}: {data}')
+        nonce = data[:12]
+        ciphertext = data[12:]
+        plaintext = aesgcm.decrypt(nonce,ciphertext, None)
+        msg_rdy = plaintext.decode()
+        print(f'{timestamp_str}: {msg_rdy}')
 
+def recv_peer_key(event):
+    event.wait()
+    peer_public_bytes = peer_socket.recv(32)
+    peer_public_key = x25519.X25519PublicKey.from_public_bytes(peer_public_bytes)
+    return peer_public_key
 
 rendezvous = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
 rendezvous.connect(('127.0.0.1', 8080))
@@ -88,12 +110,30 @@ t.start()
 print(peer_socket)
 print(f'connected to {peer_port}')
 
-connection = True
-
-sender_thread = threading.Thread(target=send_msg, args=(peer_connected_event,))
-reciever_thread = threading.Thread(target=recv_msg, args=(peer_connected_event,))
-
 peer_connected_event.wait()
+
+peer_socket.send(
+    public_key.public_bytes(
+        encoding=serialization.Encoding.Raw,
+        format=serialization.PublicFormat.Raw
+    )
+)
+peer_public_bytes = peer_socket.recv(32)
+peer_public_key = x25519.X25519PublicKey.from_public_bytes(peer_public_bytes)
+
+shared_key = private_key.exchange(peer_public_key)
+
+aes_key = HKDF(
+    algorithm=hashes.SHA256(),
+    length=32,
+    salt=None,
+    info=b'p2p chat key',
+    ).derive(shared_key)
+
+aesgcm = AESGCM(aes_key)
+
+sender_thread = threading.Thread(target=send_msg, args=(peer_connected_event, aesgcm))
+reciever_thread = threading.Thread(target=recv_msg, args=(peer_connected_event, aesgcm))
 
 sender_thread.start()
 reciever_thread.start()
