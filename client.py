@@ -58,6 +58,7 @@ def listener_for_peer(port, event):
 def send_msg(event, aesgcm, shutdown_event):
     event.wait()
     print('Connected Start chatting!')
+    print('Enter "quit" to leave')
     while not shutdown_event.is_set():
         msg = input('')
         if msg == 'quit':
