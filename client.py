@@ -19,6 +19,7 @@ peer_socket = None
 
 listener_port = int(sys.argv[1])
 peer_connected_event = threading.Event()
+shutdown_event = threading.Event()
 
 timestamp = datetime.datetime.now()
 timestamp_str = timestamp.strftime('%Y-%m-%d %H:%M:%S')
@@ -54,28 +55,43 @@ def listener_for_peer(port, event):
     event.set()
 
 
-def send_msg(event, aesgcm):
+def send_msg(event, aesgcm, shutdown_event):
     event.wait()
     print('Connected Start chatting!')
-    while True:
+    while not shutdown_event.is_set():
         msg = input('')
+        if msg == 'quit':
+            shutdown_event.set()
+            peer_socket.shutdown(socket.SHUT_RDWR)
+            peer_socket.close()
+            return
         plaintext = msg.encode()
         nonce = os.urandom(12)
         ciphertext = aesgcm.encrypt(nonce, plaintext, None)
         peer_socket.send(nonce + ciphertext)
 
 
-def recv_msg(event, aesgcm):
+def recv_msg(event, aesgcm, shutdown_event):
     event.wait()
-    while True:
-        data = peer_socket.recv(4096)
-        if not data:
+    while not shutdown_event.is_set():
+        try:
+            data = peer_socket.recv(4096)
+            if not data:
+                shutdown_event.set()
+                break
+            nonce = data[:12]
+            ciphertext = data[12:]
+            plaintext = aesgcm.decrypt(nonce,ciphertext, None)
+            msg_rdy = plaintext.decode()
+
+            if msg_rdy == 'quit':
+                shutdown_event.set()
+                break
+            print(f'{timestamp_str}: {msg_rdy}')
+
+        except OSError:
+            #socket closed elsewhere
             break
-        nonce = data[:12]
-        ciphertext = data[12:]
-        plaintext = aesgcm.decrypt(nonce,ciphertext, None)
-        msg_rdy = plaintext.decode()
-        print(f'{timestamp_str}: {msg_rdy}')
 
 def recv_peer_key(event):
     event.wait()
@@ -132,8 +148,8 @@ aes_key = HKDF(
 
 aesgcm = AESGCM(aes_key)
 
-sender_thread = threading.Thread(target=send_msg, args=(peer_connected_event, aesgcm))
-reciever_thread = threading.Thread(target=recv_msg, args=(peer_connected_event, aesgcm))
+sender_thread = threading.Thread(target=send_msg, args=(peer_connected_event, aesgcm, shutdown_event))
+reciever_thread = threading.Thread(target=recv_msg, args=(peer_connected_event, aesgcm, shutdown_event))
 
 sender_thread.start()
 reciever_thread.start()
