@@ -1,4 +1,5 @@
 #TODO: add quitting function, prevent MITM attacks(authentification), open it up to web, not just client local cli based, gui
+#TODO: current: user authentification, save peer name and finger print to local json on exit. warn on un recogonized devices, load on startup
 
 import socket
 import threading
@@ -6,6 +7,7 @@ import time
 import sys
 import datetime
 import os
+import json
 from cryptography.hazmat.primitives import serialization
 from cryptography.hazmat.primitives.asymmetric import x25519
 from cryptography.hazmat.primitives.kdf.hkdf import HKDF
@@ -14,6 +16,9 @@ from cryptography.hazmat.primitives.ciphers.aead import AESGCM
 
 private_key = x25519.X25519PrivateKey.generate()
 public_key = private_key.public_key()
+
+known_users = {}
+users_file = 'known_users.json'
 
 peer_socket = None
 
@@ -54,7 +59,6 @@ def listener_for_peer(port, event):
     print(f'Peer connected from {addr}')
     event.set()
 
-
 def send_msg(event, aesgcm, shutdown_event):
     event.wait()
     print('Connected Start chatting!')
@@ -62,6 +66,8 @@ def send_msg(event, aesgcm, shutdown_event):
     while not shutdown_event.is_set():
         msg = input('')
         if msg == 'quit':
+            with open(users_file, 'wb') as f:
+                f.write(known_users)
             shutdown_event.set()
             peer_socket.shutdown(socket.SHUT_RDWR)
             peer_socket.close()
@@ -71,13 +77,14 @@ def send_msg(event, aesgcm, shutdown_event):
         ciphertext = aesgcm.encrypt(nonce, plaintext, None)
         peer_socket.send(nonce + ciphertext)
 
-
 def recv_msg(event, aesgcm, shutdown_event):
     event.wait()
     while not shutdown_event.is_set():
         try:
             data = peer_socket.recv(4096)
             if not data:
+                with open(users_file, 'wb') as f:
+                    f.write(known_users)
                 shutdown_event.set()
                 break
             nonce = data[:12]
@@ -99,6 +106,11 @@ def recv_peer_key(event):
     peer_public_bytes = peer_socket.recv(32)
     peer_public_key = x25519.X25519PublicKey.from_public_bytes(peer_public_bytes)
     return peer_public_key
+
+if os.path.exists(users_file):
+    with open(users_file, 'rb') as f:
+        known_users = f.read()
+        
 
 rendezvous = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
 rendezvous.connect(('127.0.0.1', 8080))
@@ -138,6 +150,7 @@ peer_socket.send(
 peer_public_bytes = peer_socket.recv(32)
 peer_public_key = x25519.X25519PublicKey.from_public_bytes(peer_public_bytes)
 
+
 shared_key = private_key.exchange(peer_public_key)
 
 aes_key = HKDF(
@@ -148,6 +161,12 @@ aes_key = HKDF(
     ).derive(shared_key)
 
 aesgcm = AESGCM(aes_key)
+
+name = input('enter your name: ')
+peer_socket.send(name.encode())
+peer_name = peer_socket.recv(1024).decode()
+peer_fingerprint = SHA(peer_public_bytes)
+
 
 sender_thread = threading.Thread(target=send_msg, args=(peer_connected_event, aesgcm, shutdown_event))
 reciever_thread = threading.Thread(target=recv_msg, args=(peer_connected_event, aesgcm, shutdown_event))
