@@ -1,5 +1,3 @@
-#TODO: give clients other clients info ip/port so they can connect to each other
-
 import socket
 import datetime
 import threading
