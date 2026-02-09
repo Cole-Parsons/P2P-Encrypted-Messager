@@ -17,7 +17,6 @@ from cryptography.hazmat.primitives.ciphers.aead import AESGCM
 private_key = x25519.X25519PrivateKey.generate()
 public_key = private_key.public_key()
 
-known_users = {}
 users_file = 'known_users.json'
 
 peer_socket = None
@@ -66,8 +65,7 @@ def send_msg(event, aesgcm, shutdown_event):
     while not shutdown_event.is_set():
         msg = input('')
         if msg == 'quit':
-            with open(users_file, 'wb') as f:
-                f.write(known_users)
+            save_known_users()
             shutdown_event.set()
             peer_socket.shutdown(socket.SHUT_RDWR)
             peer_socket.close()
@@ -83,8 +81,7 @@ def recv_msg(event, aesgcm, shutdown_event):
         try:
             data = peer_socket.recv(4096)
             if not data:
-                with open(users_file, 'wb') as f:
-                    f.write(known_users)
+                save_known_users()
                 shutdown_event.set()
                 break
             nonce = data[:12]
@@ -107,11 +104,26 @@ def recv_peer_key(event):
     peer_public_key = x25519.X25519PublicKey.from_public_bytes(peer_public_bytes)
     return peer_public_key
 
-if os.path.exists(users_file):
-    with open(users_file, 'rb') as f:
-        known_users = f.read()
-        
+def fingerprint(pubkey_bytes):
+    digest = hashes.Hash(hashes.SHA256())
+    digest.update(pubkey_bytes)
+    return digest.finalize().hex()
 
+def save_known_users():
+    tmp = users_file + '.tmp'
+    with open(tmp, 'w') as f:
+        json.dump(known_users, f, indent=2)
+    os.replace(tmp, users_file)
+
+known_users = {}
+
+if os.path.exists(users_file):
+    try:
+        save_known_users()
+    except json.JSONDecodeError:
+        print('known users is curropted or empty, resetting')
+        known_users = {}
+        
 rendezvous = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
 rendezvous.connect(('127.0.0.1', 8080))
 
@@ -165,11 +177,35 @@ aesgcm = AESGCM(aes_key)
 name = input('enter your name: ')
 peer_socket.send(name.encode())
 peer_name = peer_socket.recv(1024).decode()
-peer_fingerprint = SHA(peer_public_bytes)
+peer_fingerprint = fingerprint(peer_public_bytes)
 
-
-sender_thread = threading.Thread(target=send_msg, args=(peer_connected_event, aesgcm, shutdown_event))
-reciever_thread = threading.Thread(target=recv_msg, args=(peer_connected_event, aesgcm, shutdown_event))
-
-sender_thread.start()
-reciever_thread.start()
+if peer_name in known_users:
+    if peer_fingerprint == known_users[peer_name]:
+        sender_thread = threading.Thread(target=send_msg, args=(peer_connected_event, aesgcm, shutdown_event))
+        reciever_thread = threading.Thread(target=recv_msg, args=(peer_connected_event, aesgcm, shutdown_event))
+        sender_thread.start()
+        reciever_thread.start()
+    else:
+        print(f'You are about to talk to {peer_name}, but they have a different fingerprint. Do you accept? y/n ?')
+        user_in = input('>')
+        if user_in == 'y':
+            known_users[peer_name] = peer_fingerprint
+            sender_thread = threading.Thread(target=send_msg, args=(peer_connected_event, aesgcm, shutdown_event))
+            reciever_thread = threading.Thread(target=recv_msg, args=(peer_connected_event, aesgcm, shutdown_event))
+            sender_thread.start()
+            reciever_thread.start()
+        else:
+            shutdown_event.set()
+            peer_socket.close()
+else:
+    print(f'You are about to talk to {peer_name}. Do you accept? y/n')
+    user_in = input('>')
+    if user_in == 'y':
+        known_users[peer_name] = peer_fingerprint
+        sender_thread = threading.Thread(target=send_msg, args=(peer_connected_event, aesgcm, shutdown_event))
+        reciever_thread = threading.Thread(target=recv_msg, args=(peer_connected_event, aesgcm, shutdown_event))
+        sender_thread.start()
+        reciever_thread.start()
+    else:
+        shutdown_event.set()
+        peer_socket.close()
