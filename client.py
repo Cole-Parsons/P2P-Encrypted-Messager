@@ -13,6 +13,11 @@ from cryptography.hazmat.primitives.asymmetric import x25519
 from cryptography.hazmat.primitives.kdf.hkdf import HKDF
 from cryptography.hazmat.primitives import hashes
 from cryptography.hazmat.primitives.ciphers.aead import AESGCM
+from cryptography.hazmat.primitives.asymmetric import ed25519
+
+ID_PRIVATE_FILE = 'identity_private.pem'
+ID_PUBLIC_FILE = ' identity_public.pem'
+
 
 private_key = x25519.X25519PrivateKey.generate()
 public_key = private_key.public_key()
@@ -115,6 +120,38 @@ def save_known_users():
         json.dump(known_users, f, indent=2)
     os.replace(tmp, users_file)
 
+def load_create_identity_key():
+    #checking private
+    if os.path.exists(ID_PRIVATE_FILE):
+        with open(ID_PRIVATE_FILE, 'rb') as f:
+            priv = serialization.load_pem_private_key(
+                f.read(),
+                password=None
+            )
+    else:
+        priv = ed25519.Ed25519PrivateKey.generate()
+        with open (ID_PRIVATE_FILE, 'wb') as f:
+            f.write(priv.private_bytes(
+                encoding=serialization.Encoding.PEM,
+                format=serialization.PrivateFormat.PKCS8,
+                encryption_algorithm=serialization.NoEncryption()
+            ))
+        with open(ID_PUBLIC_FILE, 'wb') as f:
+            f.write(priv.public_key().public_bytes(
+                encoding=serialization.Encoding.PEM,
+                format=serialization.PublicFormat.SubjectPublicKeyInfo
+            ))
+    return priv
+
+def begin_chatting():
+    sender_thread = threading.Thread(target=send_msg, args=(peer_connected_event, aesgcm, shutdown_event))
+    reciever_thread = threading.Thread(target=recv_msg, args=(peer_connected_event, aesgcm, shutdown_event))
+    sender_thread.start()
+    reciever_thread.start()
+
+indentity_private = load_create_identity_key()
+identity_public = indentity_private.public_key()
+
 known_users = {}
 
 if os.path.exists(users_file):
@@ -179,33 +216,4 @@ peer_socket.send(name.encode())
 peer_name = peer_socket.recv(1024).decode()
 peer_fingerprint = fingerprint(peer_public_bytes)
 
-if peer_name in known_users:
-    if peer_fingerprint == known_users[peer_name]:
-        sender_thread = threading.Thread(target=send_msg, args=(peer_connected_event, aesgcm, shutdown_event))
-        reciever_thread = threading.Thread(target=recv_msg, args=(peer_connected_event, aesgcm, shutdown_event))
-        sender_thread.start()
-        reciever_thread.start()
-    else:
-        print(f'You are about to talk to {peer_name}, but they have a different fingerprint. Do you accept? y/n ?')
-        user_in = input('>')
-        if user_in == 'y':
-            known_users[peer_name] = peer_fingerprint
-            sender_thread = threading.Thread(target=send_msg, args=(peer_connected_event, aesgcm, shutdown_event))
-            reciever_thread = threading.Thread(target=recv_msg, args=(peer_connected_event, aesgcm, shutdown_event))
-            sender_thread.start()
-            reciever_thread.start()
-        else:
-            shutdown_event.set()
-            peer_socket.close()
-else:
-    print(f'You are about to talk to {peer_name}. Do you accept? y/n')
-    user_in = input('>')
-    if user_in == 'y':
-        known_users[peer_name] = peer_fingerprint
-        sender_thread = threading.Thread(target=send_msg, args=(peer_connected_event, aesgcm, shutdown_event))
-        reciever_thread = threading.Thread(target=recv_msg, args=(peer_connected_event, aesgcm, shutdown_event))
-        sender_thread.start()
-        reciever_thread.start()
-    else:
-        shutdown_event.set()
-        peer_socket.close()
+begin_chatting()
