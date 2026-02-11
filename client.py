@@ -1,5 +1,4 @@
-#TODO: add quitting function, prevent MITM attacks(authentification), open it up to web, not just client local cli based, gui
-#TODO: current: user authentification, save peer name and finger print to local json on exit. warn on un recogonized devices, load on startup
+#TODO: expose a port on router so can do p2p on different machines.
 
 import socket
 import threading
@@ -8,6 +7,7 @@ import sys
 import datetime
 import os
 import json
+from cryptography.hazmat.primitives.asymmetric import ec
 from cryptography.hazmat.primitives import serialization
 from cryptography.hazmat.primitives.asymmetric import x25519
 from cryptography.hazmat.primitives.kdf.hkdf import HKDF
@@ -16,7 +16,7 @@ from cryptography.hazmat.primitives.ciphers.aead import AESGCM
 from cryptography.hazmat.primitives.asymmetric import ed25519
 
 ID_PRIVATE_FILE = 'identity_private.pem'
-ID_PUBLIC_FILE = ' identity_public.pem'
+ID_PUBLIC_FILE = 'identity_public.pem'
 
 
 private_key = x25519.X25519PrivateKey.generate()
@@ -31,8 +31,6 @@ peer_connected_event = threading.Event()
 shutdown_event = threading.Event()
 
 timestamp = datetime.datetime.now()
-timestamp_str = timestamp.strftime('%Y-%m-%d %H:%M:%S')
-
 
 def connect_to_peer(ip, port, event):
     global peer_socket
@@ -70,7 +68,6 @@ def send_msg(event, aesgcm, shutdown_event):
     while not shutdown_event.is_set():
         msg = input('')
         if msg == 'quit':
-            save_known_users()
             shutdown_event.set()
             peer_socket.shutdown(socket.SHUT_RDWR)
             peer_socket.close()
@@ -86,7 +83,6 @@ def recv_msg(event, aesgcm, shutdown_event):
         try:
             data = peer_socket.recv(4096)
             if not data:
-                save_known_users()
                 shutdown_event.set()
                 break
             nonce = data[:12]
@@ -97,6 +93,7 @@ def recv_msg(event, aesgcm, shutdown_event):
             if msg_rdy == 'quit':
                 shutdown_event.set()
                 break
+            timestamp_str = timestamp.strftime('%Y-%m-%d %H:%M:%S')
             print(f'{timestamp_str}: {msg_rdy}')
 
         except OSError:
@@ -114,12 +111,11 @@ def fingerprint(pubkey_bytes):
     digest.update(pubkey_bytes)
     return digest.finalize().hex()
 
-def save_known_users():
-    tmp = users_file + '.tmp'
-    with open(tmp, 'w') as f:
+def save_known_users(file):
+    with open(file, 'w') as f:
         json.dump(known_users, f, indent=2)
-    os.replace(tmp, users_file)
 
+#create/load pub&priv keys
 def load_create_identity_key():
     #checking private
     if os.path.exists(ID_PRIVATE_FILE):
@@ -143,20 +139,29 @@ def load_create_identity_key():
             ))
     return priv
 
+#start send & recieve msg threads
 def begin_chatting():
     sender_thread = threading.Thread(target=send_msg, args=(peer_connected_event, aesgcm, shutdown_event))
     reciever_thread = threading.Thread(target=recv_msg, args=(peer_connected_event, aesgcm, shutdown_event))
     sender_thread.start()
     reciever_thread.start()
 
-indentity_private = load_create_identity_key()
-identity_public = indentity_private.public_key()
+identity_private = load_create_identity_key()
+identity_public = identity_private.public_key()
+
+signature = identity_private.sign(
+    public_key.public_bytes(
+        encoding=serialization.Encoding.Raw,
+        format=serialization.PublicFormat.Raw
+    )
+)
 
 known_users = {}
 
 if os.path.exists(users_file):
     try:
-        save_known_users()
+        with open(users_file, 'r') as f:
+            known_users = json.load(f)
     except json.JSONDecodeError:
         print('known users is curropted or empty, resetting')
         known_users = {}
@@ -170,13 +175,12 @@ print('Connected to server')
 print('Waiting for other client to connect')
 
 data = rendezvous.recv(1024).decode()
+
 if not data:
     raise RuntimeError('Server closed without sending peer error')
 peer_ip, peer_port, peer_role = data.split(':')
 peer_port = int(peer_port)
 rendezvous.close()
-
-print(peer_ip, peer_port)
 
 if peer_role == 'listener':
    t = threading.Thread(target=listener_for_peer, args=(listener_port, peer_connected_event)) 
@@ -185,22 +189,83 @@ else:
     
 t.start()
 
-print(peer_socket)
 print(f'connected to {peer_port}')
 
 peer_connected_event.wait()
 
-peer_socket.send(
-    public_key.public_bytes(
-        encoding=serialization.Encoding.Raw,
-        format=serialization.PublicFormat.Raw
-    )
+
+
+#Send id pub key
+my_identity_pub_bytes = identity_public.public_bytes(
+    encoding=serialization.Encoding.Raw,
+    format=serialization.PublicFormat.Raw
 )
-peer_public_bytes = peer_socket.recv(32)
-peer_public_key = x25519.X25519PublicKey.from_public_bytes(peer_public_bytes)
+peer_socket.send(my_identity_pub_bytes)
 
+#Recv peer pub key
+peer_identity_public_bytes = peer_socket.recv(32)
+peer_identity_public = ed25519.Ed25519PublicKey.from_public_bytes(
+    peer_identity_public_bytes
+)
 
-shared_key = private_key.exchange(peer_public_key)
+#Send eph key
+my_ephemeral_pub_bytes = public_key.public_bytes(
+    encoding=serialization.Encoding.Raw,
+    format=serialization.PublicFormat.Raw
+)
+peer_socket.send(my_ephemeral_pub_bytes)
+
+#Recv eph key
+peer_ephemeral_pub_bytes = peer_socket.recv(32)
+peer_ephemeral_public = x25519.X25519PublicKey.from_public_bytes(
+    peer_ephemeral_pub_bytes
+)
+
+#create & send signature
+my_signature = identity_private.sign(my_ephemeral_pub_bytes)
+peer_socket.send(my_signature)
+
+#recv peer signature
+peer_signature = peer_socket.recv(64)
+
+#verify peer identity
+try:
+    peer_identity_public.verify(
+        peer_signature,
+        peer_ephemeral_pub_bytes
+    )
+except Exception:
+    print('peer authentification failed! MITM?')
+    peer_socket.close()
+    sys.exit()
+
+print('peer signature verified')
+
+#Finger print peer identity
+peer_fingerprint = fingerprint(peer_identity_public_bytes)
+
+name = input('enter your name: ')
+peer_socket.send(name.encode())
+peer_name = peer_socket.recv(1024).decode()
+
+if peer_name in known_users:
+    if known_users[peer_name] != peer_fingerprint:
+        print('Identity key changed, possible reinstall or impersonation.')
+        print('continue y/n')
+        choice = input('>')
+        if choice.lower() != 'y':
+            peer_socket.close()
+            sys.exit()
+else:
+    print('New user detected. Saving finger print')
+
+            
+#if new user
+known_users[peer_name] = peer_fingerprint
+
+save_known_users(users_file)
+
+shared_key = private_key.exchange(peer_ephemeral_public)
 
 aes_key = HKDF(
     algorithm=hashes.SHA256(),
@@ -210,10 +275,5 @@ aes_key = HKDF(
     ).derive(shared_key)
 
 aesgcm = AESGCM(aes_key)
-
-name = input('enter your name: ')
-peer_socket.send(name.encode())
-peer_name = peer_socket.recv(1024).decode()
-peer_fingerprint = fingerprint(peer_public_bytes)
 
 begin_chatting()
