@@ -1,3 +1,4 @@
+#TODO: Expose port, on VM for testing us Bridged Mode
 import socket
 import datetime
 import threading
@@ -7,10 +8,12 @@ connected_clients = {}
 clients_lock = threading.Lock()
 id_counter = 0
 
+server_port = int(sys.argv[2])
+
 server = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-server.bind(('127.0.0.1', 8080))
+server.bind(('0.0.0.0', server_port))
 server.listen(2)
-print('Server listening on port 8080...')
+print(f'Server listening on port {server_port}...')
 
 while len(connected_clients) < 2:
     client, addr = server.accept()
@@ -26,16 +29,17 @@ while len(connected_clients) < 2:
         'socket': client,
         'ip': ip,
         'port': listener_port,
-        'role': 'listener' if id_counter == 1 else 'connector'
         }
 
     print(f'{client_id} connected from {addr}')
 
+#assigning client 1 data
 c1 = connected_clients['client1']
 c1_ip = connected_clients['client1']['ip']
 c1_port = connected_clients['client1']['port']
 c1_role = connected_clients['client1']['role']
 
+#assigning client 2 data
 c2 = connected_clients['client2']
 c2_ip = connected_clients['client2']['ip']
 c2_port = connected_clients['client2']['port']
