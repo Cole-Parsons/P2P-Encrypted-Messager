@@ -1,3 +1,4 @@
+# (Currently being updated to support cross network connections)
 # Secure P2P Encrypted Chat  
 A peer-to-peer chat application written in Python that establishes a secure, encrypted channel between two clients using modern cryptography. Peers discover each other via a lightweight rendezvous server, then communicate directly over TCP with end-to-end encryption.  
 
