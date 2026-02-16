@@ -47,7 +47,7 @@ def listener_for_peer(port, event):
     s.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
 
     print(f'printing socket as s for listener {s}')
-    s.bind(('127.0.0.1', port))
+    s.bind(('0.0.0.0', port))
     s.listen(1)
 
     conn, addr = s.accept()
@@ -142,6 +142,15 @@ def begin_chatting():
     sender_thread.start()
     reciever_thread.start()
 
+def recv_exact(sock, n):
+    data = b''
+    while len(data) < n:
+        chunk = sock.recv(n - len(data))
+        if not chunk:
+            raise RuntimeError('Connection closed')
+        data += chunk
+    return data
+
 identity_private = load_create_identity_key()
 identity_public = identity_private.public_key()
 
@@ -177,14 +186,11 @@ data = rendezvous.recv(1024).decode()
 
 if not data:
     raise RuntimeError('Server closed without sending peer error')
-peer_ip, peer_port, peer_role = data.split(':')
+peer_ip, peer_port = data.split(':')
 peer_port = int(peer_port)
 rendezvous.close()
 
-if peer_role == 'listener':
-   t = threading.Thread(target=listener_for_peer, args=(listener_port, peer_connected_event)) 
-else:
-    t = threading.Thread(target=connect_to_peer, args=(peer_ip, peer_port, peer_connected_event))
+t = threading.Thread(target=connect_to_peer, args=(peer_ip, peer_port, peer_connected_event))
     
 t.start()
 
@@ -202,7 +208,7 @@ my_identity_pub_bytes = identity_public.public_bytes(
 peer_socket.send(my_identity_pub_bytes)
 
 #Recv peer pub key
-peer_identity_public_bytes = peer_socket.recv(32)
+peer_identity_public_bytes = recv_exact(peer_socket, 32)
 peer_identity_public = ed25519.Ed25519PublicKey.from_public_bytes(
     peer_identity_public_bytes
 )
@@ -215,7 +221,7 @@ my_ephemeral_pub_bytes = public_key.public_bytes(
 peer_socket.send(my_ephemeral_pub_bytes)
 
 #Recv eph key
-peer_ephemeral_pub_bytes = peer_socket.recv(32)
+peer_ephemeral_pub_bytes = recv_exact(peer_socket, 32)
 peer_ephemeral_public = x25519.X25519PublicKey.from_public_bytes(
     peer_ephemeral_pub_bytes
 )
@@ -225,7 +231,7 @@ my_signature = identity_private.sign(my_ephemeral_pub_bytes)
 peer_socket.send(my_signature)
 
 #recv peer signature
-peer_signature = peer_socket.recv(64)
+peer_signature = recv_exact(peer_socket, 64)
 
 #verify peer identity
 try:

@@ -1,14 +1,17 @@
 #TODO: Expose port, on VM for testing us Bridged Mode
 import socket
 import datetime
+import sys
 import threading
 import time
+import os
+
 
 connected_clients = {}
 clients_lock = threading.Lock()
 id_counter = 0
 
-server_port = int(sys.argv[2])
+server_port = int(sys.argv[1])
 
 server = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
 server.bind(('0.0.0.0', server_port))
@@ -37,20 +40,18 @@ while len(connected_clients) < 2:
 c1 = connected_clients['client1']
 c1_ip = connected_clients['client1']['ip']
 c1_port = connected_clients['client1']['port']
-c1_role = connected_clients['client1']['role']
 
 #assigning client 2 data
 c2 = connected_clients['client2']
 c2_ip = connected_clients['client2']['ip']
 c2_port = connected_clients['client2']['port']
-c2_role = connected_clients['client2']['role']
 
 #send client 1 data to client 2
-c1_data = f'{c1_ip}:{c1_port}:{c1_role}'
+c1_data = f'{c1_ip}:{c1_port}'
 c2['socket'].send(c1_data.encode())
 c2['socket'].close()
 
 #send client2 data to client1
-c2_data = f'{c2_ip}:{c2_port}:{c2_role}'
+c2_data = f'{c2_ip}:{c2_port}'
 c1['socket'].send(c2_data.encode())
 c1['socket'].close()
